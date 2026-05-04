@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: dq-postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dq_user -d dq_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    environment:
+      POSTGRES_DB: dq_service
+      POSTGRES_USER: dq_user
+      POSTGRES_PASSWORD: dq_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    platform: linux/amd64
+    container_name: dq-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dq-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://dq_user:dq_password@postgres:5432/dq_service
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_FROM: dq-monitor@example.com
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    container_name: dq-worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://dq_user:dq_password@postgres:5432/dq_service
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_FROM: dq-monitor@example.com
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dq-frontend
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres_data:
