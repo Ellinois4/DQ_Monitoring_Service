@@ -42,6 +42,30 @@ const DIMENSIONS = [
   { key: 'integrity', label: 'Целостность', description: 'Проверки ссылочной целостности и обязательных связей между таблицами.' },
 ]
 
+const WEEK_DAYS = [
+  { value: 1, label: 'Понедельник' },
+  { value: 2, label: 'Вторник' },
+  { value: 3, label: 'Среда' },
+  { value: 4, label: 'Четверг' },
+  { value: 5, label: 'Пятница' },
+  { value: 6, label: 'Суббота' },
+  { value: 7, label: 'Воскресенье' },
+]
+
+function formatSchedule(config) {
+  const type = config.schedule_type || 'manual'
+  const time = config.schedule_time ? String(config.schedule_time).slice(0, 5) : ''
+  if (type === 'manual') return 'Ручной запуск'
+  if (type === 'interval') return `Каждые ${config.schedule_interval_minutes || '—'} мин.`
+  if (type === 'daily') return `Ежедневно${time ? ` в ${time}` : ''}`
+  if (type === 'weekly') {
+    const day = WEEK_DAYS.find((item) => Number(item.value) === Number(config.schedule_day_of_week))?.label || 'день недели не задан'
+    return `Еженедельно: ${day}${time ? ` в ${time}` : ''}`
+  }
+  if (type === 'monthly') return `Ежемесячно: ${config.schedule_day_of_month || '—'} числа${time ? ` в ${time}` : ''}`
+  return type
+}
+
 const CHECK_HELP = {
   sla_delivery: {
     title: 'SLA доставки таблицы',
@@ -368,6 +392,10 @@ export default function App() {
     threshold_percent: '0',
     schedule_mode: 'manual',
     schedule_interval_minutes: '',
+    schedule_time: '12:45',
+    schedule_day_of_week: 1,
+    schedule_day_of_month: 1,
+    schedule_timezone: 'Europe/Moscow',
     filter_clause: '{"conditions":[]}',
   })
 
@@ -484,11 +512,19 @@ export default function App() {
         const parsed = parseParamValue(field, rawValue)
         if (parsed !== undefined && parsed !== '') params[field.key] = parsed
       }
-      let scheduleInterval = null
-      if (form.schedule_mode === 'interval') scheduleInterval = Number(form.schedule_interval_minutes || 0)
-      if (form.schedule_mode === 'daily') scheduleInterval = 24 * 60
-      if (form.schedule_mode === 'weekly') scheduleInterval = 7 * 24 * 60
-      if (form.schedule_mode === 'monthly') scheduleInterval = 30 * 24 * 60
+      const scheduleType = form.schedule_mode
+      if (scheduleType === 'interval' && Number(form.schedule_interval_minutes || 0) <= 0) {
+        throw new Error('Для интервального запуска укажите положительный интервал в минутах')
+      }
+      if (['daily', 'weekly', 'monthly'].includes(scheduleType) && !form.schedule_time) {
+        throw new Error('Для выбранной регулярности укажите время запуска')
+      }
+      if (scheduleType === 'weekly' && !form.schedule_day_of_week) {
+        throw new Error('Для еженедельного запуска выберите день недели')
+      }
+      if (scheduleType === 'monthly' && (!form.schedule_day_of_month || Number(form.schedule_day_of_month) < 1 || Number(form.schedule_day_of_month) > 31)) {
+        throw new Error('Для ежемесячного запуска укажите день месяца от 1 до 31')
+      }
 
       const payload = {
         dataset_id: Number(setupDatasetId),
@@ -498,7 +534,12 @@ export default function App() {
         check_name: form.check_name || selectedCheckType.name,
         severity: form.severity,
         threshold_percent: Number(form.threshold_percent || 0),
-        schedule_interval_minutes: scheduleInterval || null,
+        schedule_type: scheduleType,
+        schedule_interval_minutes: scheduleType === 'interval' ? Number(form.schedule_interval_minutes) : null,
+        schedule_time: ['daily', 'weekly', 'monthly'].includes(scheduleType) ? form.schedule_time : null,
+        schedule_day_of_week: scheduleType === 'weekly' ? Number(form.schedule_day_of_week) : null,
+        schedule_day_of_month: scheduleType === 'monthly' ? Number(form.schedule_day_of_month) : null,
+        schedule_timezone: form.schedule_timezone || 'Europe/Moscow',
         params,
         filter_clause: JSON.parse(form.filter_clause || '{"conditions":[]}'),
         is_enabled: true,
@@ -506,7 +547,7 @@ export default function App() {
       await fetchJson('/api/check-configs', { method: 'POST', body: JSON.stringify(payload) })
       setMessage({ type: 'success', text: 'Проверка создана' })
       setParamValues({})
-      setForm((prev) => ({ ...prev, check_name: '', attribute_id: '', schedule_interval_minutes: '', threshold_percent: '0' }))
+      setForm((prev) => ({ ...prev, check_name: '', attribute_id: '', schedule_interval_minutes: '', schedule_time: '12:45', schedule_day_of_week: 1, schedule_day_of_month: 1, threshold_percent: '0' }))
       await loadConfigs(monitorDatasetId)
     } catch (error) {
       setMessage({ type: 'error', text: error.message })
@@ -718,6 +759,52 @@ export default function App() {
                       {form.schedule_mode === 'interval' && (
                         <TextField sx={{ mt: 1 }} label="Интервал, минут" type="number" value={form.schedule_interval_minutes} onChange={(e) => setForm({ ...form, schedule_interval_minutes: e.target.value })} />
                       )}
+                      {['daily', 'weekly', 'monthly'].includes(form.schedule_mode) && (
+                        <Grid container spacing={2} sx={{ mt: 0.5 }}>
+                          <Grid item xs={12} md={4}>
+                            <TextField
+                              label="Время запуска"
+                              type="time"
+                              value={form.schedule_time}
+                              onChange={(e) => setForm({ ...form, schedule_time: e.target.value })}
+                              fullWidth
+                              InputLabelProps={{ shrink: true }}
+                              helperText="Например: 12:45"
+                            />
+                          </Grid>
+                          {form.schedule_mode === 'weekly' && (
+                            <Grid item xs={12} md={4}>
+                              <FormControl fullWidth>
+                                <InputLabel>День недели</InputLabel>
+                                <Select value={form.schedule_day_of_week} label="День недели" onChange={(e) => setForm({ ...form, schedule_day_of_week: e.target.value })}>
+                                  {WEEK_DAYS.map((day) => <MenuItem key={day.value} value={day.value}>{day.label}</MenuItem>)}
+                                </Select>
+                              </FormControl>
+                            </Grid>
+                          )}
+                          {form.schedule_mode === 'monthly' && (
+                            <Grid item xs={12} md={4}>
+                              <TextField
+                                label="День месяца"
+                                type="number"
+                                value={form.schedule_day_of_month}
+                                onChange={(e) => setForm({ ...form, schedule_day_of_month: e.target.value })}
+                                fullWidth
+                                inputProps={{ min: 1, max: 31 }}
+                              />
+                            </Grid>
+                          )}
+                          <Grid item xs={12} md={4}>
+                            <TextField
+                              label="Часовой пояс"
+                              value={form.schedule_timezone}
+                              onChange={(e) => setForm({ ...form, schedule_timezone: e.target.value })}
+                              fullWidth
+                              helperText="Например: Europe/Moscow"
+                            />
+                          </Grid>
+                        </Grid>
+                      )}
                     </Paper>
 
                     {(PARAM_FIELDS[selectedCheckType.code] || []).length > 0 && (
@@ -805,7 +892,7 @@ export default function App() {
                         <TableCell><StatusDot status={config.last_result_status} />{config.last_result_status}</TableCell>
                         <TableCell>
                           <Typography sx={{ fontWeight: 700 }}>{config.check_name}</Typography>
-                          <Typography variant="caption" color="text.secondary">{config.check_type_name} · {config.attribute_name || 'table-level'}</Typography>
+                          <Typography variant="caption" color="text.secondary">{config.check_type_name} · {config.attribute_name || 'table-level'}</Typography><br /><Typography variant="caption" color="text.secondary">{formatSchedule(config)}</Typography>
                         </TableCell>
                         <TableCell>{DIMENSIONS.find((d) => d.key === config.dimension_name)?.label || config.dimension_name}</TableCell>
                         <TableCell>{config.last_finished_at ? new Date(config.last_finished_at).toLocaleString() : '—'}</TableCell>

@@ -63,9 +63,27 @@ CREATE TABLE IF NOT EXISTS dq_check_config (
     params JSONB,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    schedule_type VARCHAR(30) NOT NULL DEFAULT 'manual',
     schedule_interval_minutes INTEGER,
-    last_run_at TIMESTAMP
+    schedule_time TIME,
+    schedule_day_of_week INTEGER,
+    schedule_day_of_month INTEGER,
+    schedule_timezone VARCHAR(50) NOT NULL DEFAULT 'Europe/Moscow',
+    last_run_at TIMESTAMP,
+    CONSTRAINT dq_check_config_schedule_type_chk
+        CHECK (schedule_type IN ('manual', 'interval', 'daily', 'weekly', 'monthly')),
+    CONSTRAINT dq_check_config_weekday_chk
+        CHECK (schedule_day_of_week IS NULL OR schedule_day_of_week BETWEEN 1 AND 7),
+    CONSTRAINT dq_check_config_monthday_chk
+        CHECK (schedule_day_of_month IS NULL OR schedule_day_of_month BETWEEN 1 AND 31)
 );
+
+
+ALTER TABLE dq_check_config ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(30) NOT NULL DEFAULT 'manual';
+ALTER TABLE dq_check_config ADD COLUMN IF NOT EXISTS schedule_time TIME;
+ALTER TABLE dq_check_config ADD COLUMN IF NOT EXISTS schedule_day_of_week INTEGER;
+ALTER TABLE dq_check_config ADD COLUMN IF NOT EXISTS schedule_day_of_month INTEGER;
+ALTER TABLE dq_check_config ADD COLUMN IF NOT EXISTS schedule_timezone VARCHAR(50) NOT NULL DEFAULT 'Europe/Moscow';
 
 -- история запусков проверок
 CREATE TABLE IF NOT EXISTS dq_check_run (
@@ -341,3 +359,4 @@ ON CONFLICT (code) DO UPDATE SET
 INSERT INTO dq_notification_rule (email_to, phone_number, notify_on_status, critical_only)
 SELECT 'owner@example.com', '+3530000000', 'failed', false
 WHERE NOT EXISTS (SELECT 1 FROM dq_notification_rule WHERE email_to = 'owner@example.com');
+

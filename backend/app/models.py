@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, time
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, JSON
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, JSON, Time
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -92,7 +92,12 @@ class CheckConfig(Base):
     params: Mapped[Optional[dict]] = mapped_column(JSON)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    schedule_type: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
     schedule_interval_minutes: Mapped[Optional[int]] = mapped_column(Integer)
+    schedule_time: Mapped[Optional[time]] = mapped_column(Time)
+    schedule_day_of_week: Mapped[Optional[int]] = mapped_column(Integer)
+    schedule_day_of_month: Mapped[Optional[int]] = mapped_column(Integer)
+    schedule_timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Europe/Moscow")
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     dataset: Mapped[Dataset] = relationship(back_populates="check_configs")

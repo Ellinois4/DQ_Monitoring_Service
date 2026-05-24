@@ -8,7 +8,7 @@ from sqlalchemy import desc, func, select, text
 from sqlalchemy.orm import Session
 
 from . import models, schemas
-from .db import get_db
+from .db import ensure_schedule_columns, get_db
 from .runner import execute_check_run, get_check_config
 
 app = FastAPI(title="DQ Monitoring Service API")
@@ -49,7 +49,12 @@ def _config_status_from_row(row) -> schemas.CheckConfigStatusRead:
         params=row.params,
         is_enabled=row.is_enabled,
         created_at=row.created_at,
+        schedule_type=row.schedule_type,
         schedule_interval_minutes=row.schedule_interval_minutes,
+        schedule_time=row.schedule_time,
+        schedule_day_of_week=row.schedule_day_of_week,
+        schedule_day_of_month=row.schedule_day_of_month,
+        schedule_timezone=row.schedule_timezone,
         last_run_at=row.last_run_at,
         dataset_name=row.dataset_name,
         schema_name=row.schema_name,
@@ -66,6 +71,11 @@ def _config_status_from_row(row) -> schemas.CheckConfigStatusRead:
         last_failed_percent=float(row.last_failed_percent) if row.last_failed_percent is not None else None,
         last_executed_sql=getattr(row, "last_executed_sql", None),
     )
+
+
+@app.on_event("startup")
+def startup_migrations() -> None:
+    ensure_schedule_columns()
 
 
 @app.get("/health")
@@ -135,7 +145,12 @@ def list_check_configs(
                c.params,
                c.is_enabled,
                c.created_at,
+               c.schedule_type,
                c.schedule_interval_minutes,
+               c.schedule_time,
+               c.schedule_day_of_week,
+               c.schedule_day_of_month,
+               c.schedule_timezone,
                c.last_run_at,
                d.display_name AS dataset_name,
                d.schema_name,
@@ -213,6 +228,60 @@ def dataset_check_summary(dataset_id: int, db: Session = Depends(get_db)):
     )
 
 
+
+
+def normalize_schedule(payload: schemas.CheckConfigCreate) -> dict[str, Any]:
+    data = payload.model_dump()
+    schedule_type = (data.get("schedule_type") or "manual").lower().strip()
+    allowed = {"manual", "interval", "daily", "weekly", "monthly"}
+    if schedule_type not in allowed:
+        raise HTTPException(status_code=400, detail="Unsupported schedule_type")
+
+    data["schedule_type"] = schedule_type
+
+    if schedule_type == "manual":
+        data["schedule_interval_minutes"] = None
+        data["schedule_time"] = None
+        data["schedule_day_of_week"] = None
+        data["schedule_day_of_month"] = None
+        return data
+
+    if schedule_type == "interval":
+        interval = data.get("schedule_interval_minutes")
+        if interval is None or interval <= 0:
+            raise HTTPException(status_code=400, detail="schedule_interval_minutes must be positive for interval schedule")
+        data["schedule_time"] = None
+        data["schedule_day_of_week"] = None
+        data["schedule_day_of_month"] = None
+        return data
+
+    if data.get("schedule_time") is None:
+        raise HTTPException(status_code=400, detail="schedule_time is required for daily, weekly and monthly schedules")
+
+    data["schedule_interval_minutes"] = None
+
+    if schedule_type == "daily":
+        data["schedule_day_of_week"] = None
+        data["schedule_day_of_month"] = None
+        return data
+
+    if schedule_type == "weekly":
+        day = data.get("schedule_day_of_week")
+        if day is None or day < 1 or day > 7:
+            raise HTTPException(status_code=400, detail="schedule_day_of_week must be from 1 to 7 for weekly schedule")
+        data["schedule_day_of_month"] = None
+        return data
+
+    if schedule_type == "monthly":
+        day = data.get("schedule_day_of_month")
+        if day is None or day < 1 or day > 31:
+            raise HTTPException(status_code=400, detail="schedule_day_of_month must be from 1 to 31 for monthly schedule")
+        data["schedule_day_of_week"] = None
+        return data
+
+    return data
+
+
 @app.post("/api/check-configs", response_model=schemas.CheckConfigRead, dependencies=[Depends(require_admin)])
 def create_check_config(payload: schemas.CheckConfigCreate, db: Session = Depends(get_db)):
     dataset = db.get(models.Dataset, payload.dataset_id)
@@ -223,7 +292,7 @@ def create_check_config(payload: schemas.CheckConfigCreate, db: Session = Depend
         raise HTTPException(status_code=400, detail="attribute_id is required for column-level checks")
     if check_type.level_scope == "table" and payload.attribute_id:
         raise HTTPException(status_code=400, detail="attribute_id should be empty for table-level checks")
-    record = models.CheckConfig(**payload.model_dump())
+    record = models.CheckConfig(**normalize_schedule(payload))
     db.add(record)
     db.commit()
     db.refresh(record)

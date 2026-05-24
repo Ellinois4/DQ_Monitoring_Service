@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -71,14 +71,24 @@ class CheckConfigCreate(BaseModel):
     filter_clause: Optional[dict[str, Any]] = None
     params: Optional[dict[str, Any]] = None
     is_enabled: bool = True
+    schedule_type: str = "manual"
     schedule_interval_minutes: Optional[int] = None
+    schedule_time: Optional[time] = None
+    schedule_day_of_week: Optional[int] = None
+    schedule_day_of_month: Optional[int] = None
+    schedule_timezone: str = "Europe/Moscow"
 
 
 class CheckConfigRead(CheckConfigCreate):
     model_config = ConfigDict(from_attributes=True)
     check_config_id: int
     created_at: datetime
+    schedule_type: str = "manual"
     schedule_interval_minutes: Optional[int] = None
+    schedule_time: Optional[time] = None
+    schedule_day_of_week: Optional[int] = None
+    schedule_day_of_month: Optional[int] = None
+    schedule_timezone: str = "Europe/Moscow"
     last_run_at: Optional[datetime] = None
 
 
@@ -122,7 +132,12 @@ class CheckConfigStatusRead(BaseModel):
     params: Optional[dict[str, Any]] = None
     is_enabled: bool
     created_at: datetime
+    schedule_type: str = "manual"
     schedule_interval_minutes: Optional[int] = None
+    schedule_time: Optional[time] = None
+    schedule_day_of_week: Optional[int] = None
+    schedule_day_of_month: Optional[int] = None
+    schedule_timezone: str = "Europe/Moscow"
     last_run_at: Optional[datetime] = None
     dataset_name: str
     schema_name: str
