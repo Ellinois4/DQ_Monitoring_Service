@@ -3,14 +3,18 @@ from sqlalchemy.orm import sessionmaker
 
 from .config import settings
 
+# Служебная БД сервиса
 engine = create_engine(settings.database_url, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
+# Целевая БД с проверяемыми таблицами
+target_engine = create_engine(settings.target_database_url, future=True)
+
 
 def ensure_schedule_columns() -> None:
-    """Adds schedule columns for existing local databases without data loss.
+    """Adds schedule columns for existing local service databases without data loss.
 
-    init.sql creates these columns for a clean database. This helper is needed when
+    init.sql creates these columns for a clean metadata database. This helper is needed when
     a developer updates the project but keeps an old Docker volume.
     """
     statements = [

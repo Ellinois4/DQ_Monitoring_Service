@@ -18,6 +18,25 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
+  target_postgres:
+    image: postgres:17
+    container_name: dq-target-postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U target_user -d dq_target"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    environment:
+      POSTGRES_DB: dq_target
+      POSTGRES_USER: target_user
+      POSTGRES_PASSWORD: target_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - target_postgres_data:/var/lib/postgresql/data
+      - ./sql/target_init.sql:/docker-entrypoint-initdb.d/target_init.sql:ro
+
   mailhog:
     image: mailhog/mailhog:latest
     platform: linux/amd64
@@ -33,6 +52,7 @@ services:
     container_name: dq-backend
     environment:
       DATABASE_URL: postgresql+psycopg://dq_user:dq_password@postgres:5432/dq_service
+      TARGET_DATABASE_URL: postgresql+psycopg://target_user:target_password@target_postgres:5432/dq_target
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
       SMTP_FROM: dq-monitor@example.com
@@ -40,6 +60,8 @@ services:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      target_postgres:
         condition: service_healthy
       mailhog:
         condition: service_started
@@ -51,12 +73,15 @@ services:
     container_name: dq-worker
     environment:
       DATABASE_URL: postgresql+psycopg://dq_user:dq_password@postgres:5432/dq_service
+      TARGET_DATABASE_URL: postgresql+psycopg://target_user:target_password@target_postgres:5432/dq_target
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
       SMTP_FROM: dq-monitor@example.com
     command: ["python", "-m", "app.worker"]
     depends_on:
       postgres:
+        condition: service_healthy
+      target_postgres:
         condition: service_healthy
       mailhog:
         condition: service_started
@@ -76,3 +101,4 @@ services:
 
 volumes:
   postgres_data:
+  target_postgres_data:

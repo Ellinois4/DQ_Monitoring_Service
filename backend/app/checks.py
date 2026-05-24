@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from . import models
+from .db import target_engine
 from .check_catalog import TEMPLATES
 
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -364,14 +365,21 @@ def render_query(config: models.CheckConfig) -> RenderedQuery:
 
 
 def execute_check(db: Session, config: models.CheckConfig) -> tuple[str, int, int, float, list[dict[str, Any]]]:
+    """Execute a DQ check against the target data database.
+
+    The SQL metadata and check configuration are read using the service database session,
+    but the generated DQ SQL is executed through target_engine. This separates the
+    service metadata database from the customer/production data database.
+    """
     rendered = render_query(config)
 
-    checked_rows = db.execute(text(rendered.checked_query), rendered.params).scalar_one()
-    failed_rows = db.execute(text(rendered.failed_query), rendered.params).scalar_one()
-    samples = [
-        to_jsonable(dict(row._mapping))
-        for row in db.execute(text(rendered.sample_query), rendered.params).fetchall()
-    ]
+    with target_engine.connect() as target_conn:
+        checked_rows = target_conn.execute(text(rendered.checked_query), rendered.params).scalar_one()
+        failed_rows = target_conn.execute(text(rendered.failed_query), rendered.params).scalar_one()
+        samples = [
+            to_jsonable(dict(row._mapping))
+            for row in target_conn.execute(text(rendered.sample_query), rendered.params).fetchall()
+        ]
 
     failed_percent = round((float(failed_rows) / float(checked_rows)) * 100, 4) if checked_rows else 0.0
     executed_sql = "\n\n".join([
